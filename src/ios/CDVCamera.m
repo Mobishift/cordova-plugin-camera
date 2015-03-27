@@ -301,7 +301,7 @@ static NSString* toBase64(NSData* data) {
                         self.metadata = [[NSMutableDictionary alloc] init];
                         
                         NSMutableDictionary* EXIFDictionary = [[controllerMetadata objectForKey:(NSString*)kCGImagePropertyExifDictionary]mutableCopy];
-                        if (EXIFDictionary)	{
+                        if (EXIFDictionary) {
                             [self.metadata setObject:EXIFDictionary forKey:(NSString*)kCGImagePropertyExifDictionary];
                         }
                         
@@ -416,16 +416,30 @@ static NSString* toBase64(NSData* data) {
     
     if (saveToPhotoAlbum && image) {
         ALAssetsLibrary* library = [ALAssetsLibrary new];
-        [library writeImageToSavedPhotosAlbum:image.CGImage orientation:(ALAssetOrientation)(image.imageOrientation) completionBlock:nil];
+        [library writeImageToSavedPhotosAlbum:image.CGImage orientation:(ALAssetOrientation)(image.imageOrientation) completionBlock: ^(NSURL *assetURL, NSError *error){
+            __block CDVPluginResult *result;
+            __weak CDVCameraPicker* cameraPicker = pickerController;
+            __weak CDVCamera* weakSelf = self;
+            if(assetURL != nil){
+                result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString: assetURL.absoluteString];
+            }else{
+                result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"保存图片失败"];
+            }
+            if(result){
+                [weakSelf.commandDelegate sendPluginResult:result callbackId:cameraPicker.callbackId];
+                weakSelf.hasPendingOperation = NO;
+                weakSelf.pickerController = nil;
+            }
+        }];
+        return nil;
+    }else{
+        return result;
     }
-    
-    return result;
 }
 
-- (CDVPluginResult*)resultForVideo:(NSDictionary*)info
+- (void) imageSaveBlockCallback:(CDVPluginResult *)result
 {
-    NSString* moviePath = [[info objectForKey:UIImagePickerControllerMediaURL] absoluteString];
-    return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:moviePath];
+    
 }
 
 - (void)imagePickerController:(UIImagePickerController*)picker didFinishPickingMediaWithInfo:(NSDictionary*)info
@@ -441,7 +455,7 @@ static NSString* toBase64(NSData* data) {
             result = [self resultForImage:cameraPicker.pictureOptions info:info];
         }
         else {
-            result = [self resultForVideo:info];
+//            result = [self resultForVideo:info];
         }
         
         if (result) {
@@ -493,15 +507,15 @@ static NSString* toBase64(NSData* data) {
 
 - (CLLocationManager*)locationManager
 {
-	if (locationManager != nil) {
-		return locationManager;
-	}
+    if (locationManager != nil) {
+        return locationManager;
+    }
     
-	locationManager = [[CLLocationManager alloc] init];
-	[locationManager setDesiredAccuracy:kCLLocationAccuracyNearestTenMeters];
-	[locationManager setDelegate:self];
+    locationManager = [[CLLocationManager alloc] init];
+    [locationManager setDesiredAccuracy:kCLLocationAccuracyNearestTenMeters];
+    [locationManager setDelegate:self];
     
-	return locationManager;
+    return locationManager;
 }
 
 - (void)locationManager:(CLLocationManager*)manager didUpdateToLocation:(CLLocation*)newLocation fromLocation:(CLLocation*)oldLocation
@@ -673,6 +687,7 @@ static NSString* toBase64(NSData* data) {
         NSArray* mediaArray = @[(NSString*)(pictureOptions.mediaType == MediaTypeVideo ? kUTTypeMovie : kUTTypeImage)];
         cameraPicker.mediaTypes = mediaArray;
     }
+    
     
     return cameraPicker;
 }
