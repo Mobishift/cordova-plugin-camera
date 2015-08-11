@@ -20,15 +20,19 @@
 #import "CDVCamera.h"
 #import "CDVJpegHeaderWriter.h"
 #import "UIImage+CropScaleOrientation.h"
-#import <Cordova/NSData+Base64.h>
 #import <ImageIO/CGImageProperties.h>
 #import <AssetsLibrary/ALAssetRepresentation.h>
 #import <AssetsLibrary/AssetsLibrary.h>
+#import <AVFoundation/AVFoundation.h>
 #import <ImageIO/CGImageSource.h>
 #import <ImageIO/CGImageProperties.h>
 #import <ImageIO/CGImageDestination.h>
 #import <MobileCoreServices/UTCoreTypes.h>
 #import <objc/message.h>
+
+#ifndef __CORDOVA_4_0_0
+    #import <Cordova/NSData+Base64.h>
+#endif
 
 #define CDV_PHOTO_PREFIX @"cdv_photo_"
 
@@ -37,9 +41,20 @@ static NSSet* org_apache_cordova_validArrowDirections;
 static NSString* toBase64(NSData* data) {
     SEL s1 = NSSelectorFromString(@"cdv_base64EncodedString");
     SEL s2 = NSSelectorFromString(@"base64EncodedString");
-    SEL realSel = [data respondsToSelector:s1] ? s1 : s2;
-    NSString* (*func)(id, SEL) = (void *)[data methodForSelector:realSel];
-    return func(data, realSel);
+    SEL s3 = NSSelectorFromString(@"base64EncodedStringWithOptions:");
+    
+    if ([data respondsToSelector:s1]) {
+        NSString* (*func)(id, SEL) = (void *)[data methodForSelector:s1];
+        return func(data, s1);
+    } else if ([data respondsToSelector:s2]) {
+        NSString* (*func)(id, SEL) = (void *)[data methodForSelector:s2];
+        return func(data, s2);
+    } else if ([data respondsToSelector:s3]) {
+        NSString* (*func)(id, SEL, NSUInteger) = (void *)[data methodForSelector:s3];
+        return func(data, s3, 0);
+    } else {
+        return nil;
+    }
 }
 
 @implementation CDVPictureOptions
@@ -141,7 +156,29 @@ static NSString* toBase64(NSData* data) {
             [weakSelf.commandDelegate sendPluginResult:result callbackId:command.callbackId];
             return;
         }
-        
+
+        // Validate the app has permission to access the camera
+        if (pictureOptions.sourceType == UIImagePickerControllerSourceTypeCamera && [AVCaptureDevice respondsToSelector:@selector(authorizationStatusForMediaType:)]) {
+            AVAuthorizationStatus authStatus = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+            if (authStatus == AVAuthorizationStatusDenied ||
+                authStatus == AVAuthorizationStatusRestricted) {
+                // If iOS 8+, offer a link to the Settings app
+                NSString* settingsButton = (&UIApplicationOpenSettingsURLString != NULL)
+                    ? NSLocalizedString(@"Settings", nil)
+                    : nil;
+
+                // Denied; show an alert
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [[[UIAlertView alloc] initWithTitle:[[NSBundle mainBundle]
+                                                         objectForInfoDictionaryKey:@"CFBundleDisplayName"]
+                                                message:NSLocalizedString(@"Access to the camera has been prohibited; please enable it in the Settings app to continue.", nil)
+                                               delegate:self
+                                      cancelButtonTitle:NSLocalizedString(@"OK", nil)
+                                      otherButtonTitles:settingsButton, nil] show];
+                });
+            }
+        }
+
         CDVCameraPicker* cameraPicker = [CDVCameraPicker createFromPictureOptions:pictureOptions];
         weakSelf.pickerController = cameraPicker;
         [cameraPicker setDelegate:weakSelf];
@@ -172,6 +209,25 @@ static NSString* toBase64(NSData* data) {
             }
         });
     }];
+}
+
+// Delegate for camera permission UIAlertView
+- (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex
+{
+    // If Settings button (on iOS 8), open the settings app
+    if (buttonIndex == 1) {
+        [[UIApplication sharedApplication] openURL:[NSURL URLWithString:UIApplicationOpenSettingsURLString]];
+    }
+
+    // Dismiss the view
+    [[self.pickerController presentingViewController] dismissViewControllerAnimated:YES completion:nil];
+
+    CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"has no access to camera"];   // error callback expects string ATM
+
+    [self.commandDelegate sendPluginResult:result callbackId:self.pickerController.callbackId];
+
+    self.hasPendingOperation = NO;
+    self.pickerController = nil;
 }
 
 - (void)repositionPopover:(CDVInvokedUrlCommand*)command
