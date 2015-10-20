@@ -515,6 +515,12 @@ static NSString* toBase64(NSData* data) {
     
 }
 
+- (CDVPluginResult*)resultForVideo:(NSDictionary*)info
+{
+    NSString* moviePath = [[info objectForKey:UIImagePickerControllerMediaURL] absoluteString];
+    return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:moviePath];
+}
+
 - (void)imagePickerController:(UIImagePickerController*)picker didFinishPickingMediaWithInfo:(NSDictionary*)info
 {
     __weak CDVCameraPicker* cameraPicker = (CDVCameraPicker*)picker;
